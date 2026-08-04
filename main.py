@@ -1,9 +1,30 @@
 import telebot
 import sqlite3
 import os
+from flask import Flask
+from threading import Thread
+
+# 🌐 Render / UptimeRobot 24/7 እንዲሰራ የሚያስችለው አነስተኛ Web Server
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive and running 24/7!"
+
+def run():
+    # Render በራሱ የሚሰጠውን PORT ይጠቀማል (ከሌለ በ 8080 ይሰራል)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# የ Web Server ጥሪ ማዳመጫውን አስነሳ
+keep_alive()
 
 # 🚀 1. የ BotFather Token እዚህ ቦታ ላይ አስገባ
-BOT_TOKEN='8615606026:AAGFeTfHay72Cs1Te6MbehEmjQW45jNQBjE'
+BOT_TOKEN='8615606026:AAGFeTfHay72Cs1Te6MbehEmjQW45jNQBjE
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # 📌 የቻናል እና የአድሚን ID
@@ -198,18 +219,15 @@ def handle_channel_post(message):
     if message.chat.id == CHANNEL_ID:
         title = None
         
-        # 1. በቅድሚያ Caption ካለ ይወስዳል
         if message.caption:
             title = message.caption
         elif message.text:
             title = message.text
-        # 2. Caption ከሌለ የቪዲዮውን/ፋይሉን ስም ከነ Extension አፅድቶ ይወስዳል
         elif message.video and message.video.file_name:
             title = os.path.splitext(message.video.file_name)[0]
         elif message.document and message.document.file_name:
             title = os.path.splitext(message.document.file_name)[0]
         
-        # 3. ምንም ስም ከሌለው አውቶማቲክ ስም ይሰጠዋል
         if not title or title.strip() == "":
             title = f"የፊልም ቪዲዮ #{message.message_id}"
 
