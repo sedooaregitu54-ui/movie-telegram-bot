@@ -24,7 +24,7 @@ def keep_alive():
 keep_alive()
 
 # 🚀 1. የ BotFather Token እዚህ ቦታ ላይ አስገባ
-BOT_TOKEN='8615606026:AAGFeTfHay72Cs1Te6MbehEmjQW45jNQBjE
+BOT_TOKEN='8615606026:AAGFeTfHay72Cs1Te6MbehEmjQW45jNQBjE'
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # 📌 የቻናል እና የአድሚን ID
