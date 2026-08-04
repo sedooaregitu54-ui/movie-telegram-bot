@@ -4,7 +4,7 @@ import os
 from flask import Flask
 from threading import Thread
 
-# 🌐 Render / UptimeRobot 24/7 እንዲሰራ የሚያስችለው አነስተኛ Web Server
+# 🌐 Render / UptimeRobot 24/7 Web Server
 app = Flask('')
 
 @app.route('/')
@@ -12,7 +12,6 @@ def home():
     return "Bot is alive and running 24/7!"
 
 def run():
-    # Render በራሱ የሚሰጠውን PORT ይጠቀማል (ከሌለ በ 8080 ይሰራል)
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
@@ -20,14 +19,11 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# የ Web Server ጥሪ ማዳመጫውን አስነሳ
 keep_alive()
 
-# 🚀 1. የ BotFather Token እዚህ ቦታ ላይ አስገባ
 BOT_TOKEN='8615606026:AAGFeTfHay72Cs1Te6MbehEmjQW45jNQBjE'
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# 📌 የቻናል እና የአድሚን ID
 ADMIN_ID = 8609938129  
 CHANNEL_ID = -1003794082614  
 
@@ -44,9 +40,12 @@ def init_db():
 
 init_db()
 
-def get_main_keyboard():
+def get_main_keyboard(user_id):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add("🎬 የፊልሞች ዝርዝር", "🌐 የፊልም ምድቦች", "💰 የዋጋ ዝርዝር", "🏦 የባንክ አካውንቶች")
+    # 👑 ለአስተዳዳሪው ብቻ የሚታይ ልዩ በተን
+    if user_id == ADMIN_ID:
+        markup.add("⚙️ አድሚን ፓነል (Admin Panel)")
     return markup
 
 def generate_invite_link():
@@ -57,7 +56,6 @@ def generate_invite_link():
         print(f"Invite link generation error: {e}")
         return None
 
-# /start ሲነካ
 @bot.message_handler(commands=['start'])
 def start_welcome(message):
     user_id = message.from_user.id
@@ -70,9 +68,6 @@ def start_welcome(message):
     if not result:
         cursor.execute("INSERT INTO users (user_id, status) VALUES (?, 'unpaid')", (user_id,))
         conn.commit()
-        status = "unpaid"
-    else:
-        status = result[0]
     conn.close()
 
     welcome_text = (
@@ -84,9 +79,9 @@ def start_welcome(message):
         "🗓️ **የወርሃዊ VIP Unlimited፦** 100 ብር (ለ 30 ቀን)\n\n"
         "👇 ለመጀመር ከታች ያሉትን በተኖች ይጠቀሙ!"
     )
-    bot.send_message(message.chat.id, welcome_text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, welcome_text, reply_markup=get_main_keyboard(user_id), parse_mode="Markdown")
 
-# የደረሰኝ ፎቶ መቀበያ
+# 📸 የደረሰኝ ፎቶ ሲላክ (አሁን የ 5 ብሩን በተን ሁልጊዜ ለአድሚን ያመጣል)
 @bot.message_handler(content_types=['photo'])
 def handle_receipt(message):
     user_id = message.from_user.id
@@ -97,20 +92,19 @@ def handle_receipt(message):
     cursor = conn.cursor()
     cursor.execute("SELECT pending_movie FROM users WHERE user_id = ?", (user_id,))
     res = cursor.fetchone()
-    pending_movie = res[0] if res else 0
+    pending_movie = res[0] if res and res[0] else 0
     conn.close()
 
     markup = telebot.types.InlineKeyboardMarkup(row_width=2)
     
-    if pending_movie > 0:
-        btn_single = telebot.types.InlineKeyboardButton("🎬 5 ብር (ነጠላ)", callback_data=f"app_single_{user_id}_{pending_movie}")
-        markup.add(btn_single)
-    
+    # የ 5 ብር ነጠላ ፊልም በተን
+    btn_single = telebot.types.InlineKeyboardButton("🎬 5 ብር (ነጠላ ፊልም)", callback_data=f"app_single_{user_id}_{pending_movie}")
     btn_day = telebot.types.InlineKeyboardButton("☀️ 30 ብር (ዕለታዊ)", callback_data=f"app_unlim_{user_id}")
     btn_week = telebot.types.InlineKeyboardButton("📅 70 ብር (ሳምንታዊ)", callback_data=f"app_unlim_{user_id}")
     btn_month = telebot.types.InlineKeyboardButton("🗓️ 100 ብር (ወርሃዊ)", callback_data=f"app_unlim_{user_id}")
     btn_reject = telebot.types.InlineKeyboardButton("❌ ከልክል (Reject)", callback_data=f"reject_{user_id}")
     
+    markup.add(btn_single)
     markup.add(btn_day, btn_week, btn_month)
     markup.add(btn_reject)
     
@@ -121,9 +115,8 @@ def handle_receipt(message):
         reply_markup=markup,
         parse_mode="Markdown"
     )
-    bot.reply_to(message, "⏳ የደረሰኝ ፎቶዎ ለአስተዳዳሪው ተልኳል። ክፍያዎ ተረጋግጦ እስኪከፈትልዎት ድረስ እባክዎ በትዕግስት ይጠብቁ!")
+    bot.reply_to(message, "⏳ የደረሰኝ ፎቶዎ ለአስተዳዳሪው ተልኳል። ክፍያዎ ተረጋግጦ እስኪከፈትልዎት ድረስ እባክዎ በትዕግስትWait አድርጉ!")
 
-# የአስተዳዳሪው ውሳኔ
 @bot.callback_query_handler(func=lambda call: call.data.startswith("app_") or call.data.startswith("reject_"))
 def callback_listener(call):
     if call.from_user.id != ADMIN_ID:
@@ -152,33 +145,30 @@ def callback_listener(call):
         
         msg = "🎉 **መልካም ዜና! የ Unlimited VIP ክፍያዎ ተረጋግጧል።**\n\n"
         if invite_link:
-            msg += f"🔗 **የ VIP ቻናላችንን ለመቀላቀል ይህንን ሊንክ ይጫኑ፦**\n{invite_link}\n\n*(ማሳሰቢያ፦ ይህ ሊንክ የሚሰራው ለአንድ ሰው እና ለአንድ ጊዜ ብቻ ነው!)*"
+            msg += f"🔗 **የ VIP ቻናላችንን ለመቀላቀል ይህንን ሊንክ ይጫኑ፦**\n{invite_link}\n\n*(ማሳሰቢያ፦ ይህ ሊንክ የሚሰራው ለአንድ ሰው ብቻ ነው!)*"
         else:
             msg += "አሁን ቦቱን እና ቻናሉን መጠቀም ይችላሉ!"
 
-        bot.send_message(target_user_id, msg, reply_markup=get_main_keyboard(), parse_mode="Markdown")
+        bot.send_message(target_user_id, msg, reply_markup=get_main_keyboard(target_user_id), parse_mode="Markdown")
         
     elif action == "single":
         movie_msg_id = int(data[3])
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET pending_movie = 0 WHERE user_id = ?", (target_user_id,))
-        conn.commit()
-        conn.close()
-
         bot.edit_message_caption(
             chat_id=ADMIN_ID,
             message_id=call.message.message_id,
-            caption=call.message.caption + "\n\n🟢 **የ5 ብር ነጠላ ፊልም ተፈቅዷል! ፊልሙ ተልኳል።**",
+            caption=call.message.caption + "\n\n🟢 **የ5 ብር ነጠላ ፊልም ተፈቅዷል!**",
             reply_markup=None
         )
         
-        bot.send_message(target_user_id, "🎉 **የ5 ብር ክፍያዎ ተረጋግጧል! ፊልሙ እነሆ፦**")
-        try:
-            bot.copy_message(chat_id=target_user_id, from_chat_id=CHANNEL_ID, message_id=movie_msg_id)
-        except Exception:
-            bot.send_message(target_user_id, "⚠️ ፊልሙን መላክ አልተቻለም። ቦቱ ቻናሉ ላይ አድሚን መሆኑን ያረጋግጡ።")
+        if movie_msg_id > 0:
+            bot.send_message(target_user_id, "🎉 **የ5 ብር ክፍያዎ ተረጋግጧል! የፈለጉት ፊልም እነሆ፦**")
+            try:
+                bot.copy_message(chat_id=target_user_id, from_chat_id=CHANNEL_ID, message_id=movie_msg_id)
+            except Exception:
+                bot.send_message(target_user_id, "⚠️ ፊልሙን መላክ አልተቻለም። ቦቱ ቻናሉ ላይ አድሚን መሆኑን ያረጋገጡ።")
+        else:
+            bot.send_message(target_user_id, "🎉 **የ5 ብር ክፍያዎ ተረጋግጧል!** አሁን ከፊልም ዝርዝር ውስጥ የመረጡትን ፊልም ማውረድ ይችላሉ።")
 
     elif action == "reject":
         bot.edit_message_caption(
@@ -189,13 +179,15 @@ def callback_listener(call):
         )
         bot.send_message(target_user_id, "❌ የላኩት ክፍያ ተቀባይነት አላገኘም። እባክዎ ትክክለኛውን የክፍያ ደረሰኝ ፎቶ መላክዎን ያረጋግጡ።")
 
-# ⛔ አድሚኑ ቀኑ ያለቀበትን ሰው ከቦቱና ከቻናሉ የሚከለክልበት Command
-@bot.message_handler(commands=['revoke', 'expire'])
-def revoke_user_access(message):
-    if message.from_user.id == ADMIN_ID:
+# ⚙️ የአስተዳዳሪ ብቻ ፓነል እና አባላትን ማስወገጃ Command
+@bot.message_handler(func=lambda message: message.text == "⚙️ አድሚን ፓነል (Admin Panel)" or message.text.startswith('/revoke'))
+def admin_panel(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    if message.text.startswith('/revoke'):
         try:
             target_id = int(message.text.split()[1])
-            
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET status = 'unpaid' WHERE user_id = ?", (target_id,))
@@ -205,20 +197,28 @@ def revoke_user_access(message):
             try:
                 bot.ban_chat_member(chat_id=CHANNEL_ID, user_id=target_id)
                 bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=target_id)
-                channel_msg = "\n✅ ተጠቃሚው ከቴሌግራም ቻናሉም ተባሯል!"
+                chan_msg = "\n✅ ተጠቃሚው ከVIP ቻናሉም ተባሯል!"
             except Exception as ex:
-                channel_msg = f"\n⚠️ ከቻናል ለማስወጣት አልተቻለም፦ {ex}"
+                chan_msg = f"\n⚠️ ከቻናል ለማስወጣት አልተቻለም፦ {ex}"
 
-            bot.reply_to(message, f"⛔ ተጠቃሚ ID `{target_id}` ከ VIP ተሰርዟል!{channel_msg}", parse_mode="Markdown")
-        except Exception as e:
-            bot.reply_to(message, f"⚠️ ስህተት ተፈጥሯል፦ {e}")
+            bot.reply_to(message, f"⛔ ID `{target_id}` ያለው ተጠቃሚ ከ VIP ተሰርዟል!{chan_msg}", parse_mode="Markdown")
+        except Exception:
+            bot.reply_to(message, "⚠️ እባክህ በዚህ መልክ ጻፍ፦ `/revoke 12345678` (ማስወገድ የምትፈልገውን ሰው ID አስገባ)")
+    else:
+        admin_info = (
+            "👑 **የአስተዳዳሪ መቆጣጠሪያ ፓነል**\n\n"
+            "📌 **አባል ከ VIP ቻናል ለማስወገድ፦**\n"
+            "በቦቱ ላይ `/revoke USER_ID` ብለህ ጻፍ።\n"
+            "ምሳሌ፦ `/revoke 8609938129`\n\n"
+            "*(ይህ ሲደረግ አባሉ ከVIP ቻናሉም ይባረራል፡ ቦቱም ላይ ወደ አልከፈለ ተጠቃሚ ይይረጋል)*"
+        )
+        bot.send_message(ADMIN_ID, admin_info, parse_mode="Markdown")
 
-# 🎬 ቻናሉ ላይ ፊልም ሲጫን ለአድሚኑ የምድብ መምረጫ በተን መላኪያ
+# 🎬 ቻናሉ ላይ ፊልም ሲጫን ለአድሚኑ የምድብ መምረጫ መላኪያ
 @bot.channel_post_handler(content_types=['video', 'document', 'audio', 'text'])
 def handle_channel_post(message):
     if message.chat.id == CHANNEL_ID:
         title = None
-        
         if message.caption:
             title = message.caption
         elif message.text:
@@ -274,14 +274,9 @@ def save_movie_by_category(call):
     conn.close()
     
     cat_names = {
-        "hind": "🇮🇳 የህንድ", 
-        "amharicsingle": "🇪🇹 የአማርኛ ነጠላ", 
-        "amharicseries": "📺 የአማርኛ ተከታታይ", 
-        "turkish": "🇹🇷 የቱርክ",
-        "chinese": "🇨🇳 የቻይና",
-        "otherseries": "🌍 የሌሎች ሀገር ተከታታይ",
-        "action": "💥 አክሽን", 
-        "others": "📁 ሌላ"
+        "hind": "🇮🇳 የህንድ", "amharicsingle": "🇪🇹 የአማርኛ ነጠላ", "amharicseries": "📺 የአማርኛ ተከታታይ", 
+        "turkish": "🇹🇷 የቱርክ", "chinese": "🇨🇳 የቻይና", "otherseries": "🌍 የሌሎች ሀገር ተከታታይ",
+        "action": "💥 አክሽን", "others": "📁 ሌላ"
     }
     friendly_name = cat_names.get(category, "ሌላ")
     
@@ -293,9 +288,9 @@ def save_movie_by_category(call):
         parse_mode="Markdown"
     )
 
-# የቁልፍ ሰሌዳ በተኖች ምላሽ
 @bot.message_handler(func=lambda message: message.text in ["🎬 የፊልሞች ዝርዝር", "🌐 የፊልም ምድቦች", "💰 የዋጋ ዝርዝር", "🏦 የባንክ አካውንቶች"])
 def handle_menu_buttons(message):
+    user_id = message.from_user.id
     if message.text == "🎬 የፊልሞች ዝርዝር":
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -356,13 +351,8 @@ def handle_category_selection(call):
     conn.close()
     
     cat_names = {
-        "hind": "🇮🇳 የህንድ", 
-        "amharicsingle": "🇪🇹 የአማርኛ ነጠላ", 
-        "amharicseries": "📺 የአማርኛ ተከታታይ", 
-        "turkish": "🇹🇷 የቱርክ",
-        "chinese": "🇨🇳 የቻይና",
-        "otherseries": "🌍 የሌሎች ሀገር ተከታታይ",
-        "action": "💥 አክሽን"
+        "hind": "🇮🇳 የህንድ", "amharicsingle": "🇪🇹 የአማርኛ ነጠላ", "amharicseries": "📺 የአማርኛ ተከታታይ", 
+        "turkish": "🇹🇷 የቱርክ", "chinese": "🇨🇳 የቻይና", "otherseries": "🌍 የሌሎች ሀገር ተከታታይ", "action": "💥 አክሽን"
     }
     friendly_name = cat_names.get(cat_type, "ሌሎች")
     
