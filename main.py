@@ -42,7 +42,9 @@ init_db()
 
 def get_main_keyboard(user_id):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("🎬 የፊልሞች ዝርዝር", "🌐 የፊልም ምድቦች", "💰 የዋጋ ዝርዝር", "🏦 የባንክ አካውንቶች")
+    markup.add("🎬 የፊልሞች ዝርዝር", "🌐 የፊልም ምድቦች")
+    markup.add("💰 የዋጋ ዝርዝር", "🏦 የባንክ አካውንቶች")
+    markup.add("💬 አስተዳዳሪውን ለማናገር")
     # 👑 ለአስተዳዳሪው ብቻ የሚታይ ልዩ በተን
     if user_id == ADMIN_ID:
         markup.add("⚙️ አድሚን ፓነል (Admin Panel)")
@@ -115,7 +117,7 @@ def handle_receipt(message):
         reply_markup=markup,
         parse_mode="Markdown"
     )
-    bot.reply_to(message, "⏳ የደረሰኝ ፎቶዎ ለአስተዳዳሪው ተልኳል። ክፍያዎ ተረጋግጦ እስኪከፈትልዎት ድረስ እባክዎ በትዕግስትWait አድርጉ!")
+    bot.reply_to(message, "⏳ የደረሰኝ ፎቶዎ ለአስተዳዳሪው ተልኳል። ክፍያዎ ተረጋግጦ እስኪከፈትልዎት ድረስ እባክዎ በትዕግስት ይቆዩ!")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("app_") or call.data.startswith("reject_"))
 def callback_listener(call):
@@ -288,7 +290,7 @@ def save_movie_by_category(call):
         parse_mode="Markdown"
     )
 
-@bot.message_handler(func=lambda message: message.text in ["🎬 የፊልሞች ዝርዝር", "🌐 የፊልም ምድቦች", "💰 የዋጋ ዝርዝር", "🏦 የባንክ አካውንቶች"])
+@bot.message_handler(func=lambda message: message.text in ["🎬 የፊልሞች ዝርዝር", "🌐 የፊልም ምድቦች", "💰 የዋጋ ዝርዝር", "🏦 የባንክ አካውንቶች", "💬 አስተዳዳሪውን ለማናገር"])
 def handle_menu_buttons(message):
     user_id = message.from_user.id
     if message.text == "🎬 የፊልሞች ዝርዝር":
@@ -340,6 +342,17 @@ def handle_menu_buttons(message):
             "⚠️ *ክፍያውን ከፈጸሙ በኋላ ደረሰኙን ፎቶ አንስተው እዚህ ቦት ላይ መላክዎን አይርሱ!*"
         )
         bot.send_message(message.chat.id, bank_text, parse_mode="Markdown")
+
+    elif message.text == "💬 አስተዳዳሪውን ለማናገር":
+        contact_text = (
+            "🙋‍♂️ **እርዳታ ወይም ጥያቄ አልዎት?**\n\n"
+            "የክፍያ ችግር፣ አስተያየት ወይም ተጨማሪ መረጃ ከፈለጉ አስተዳዳሪውን ቀጥታ ማናገር ይችላሉ፦\n\n"
+            "👉 **የቴሌግራም አድራሻ፦** @Power_werked"
+        )
+        markup = telebot.types.InlineKeyboardMarkup()
+        btn_contact = telebot.types.InlineKeyboardButton("💬 ቀጥታ አድሚኑን አውራ (Chat)", url="https://t.me/Power_werked")
+        markup.add(btn_contact)
+        bot.send_message(message.chat.id, contact_text, reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
 def handle_category_selection(call):
