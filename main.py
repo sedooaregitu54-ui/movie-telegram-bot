@@ -21,7 +21,7 @@ def keep_alive():
 
 keep_alive()
 
-BOT_TOKEN='8615606026:AAGFeTfHay72Cs1Te6MbehEmjQW45jNQBjE'
+BOT_TOKEN = '8615606026:AAGFeTfHay72Cs1Te6MbehEmjQW45jNQBjE'
 bot = telebot.TeleBot(BOT_TOKEN)
 
 ADMIN_ID = 8609938129  
@@ -33,19 +33,33 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, status TEXT DEFAULT "unpaid", pending_movie INTEGER DEFAULT 0)')
-    cursor.execute('CREATE TABLE IF NOT EXISTS movies (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER, title TEXT, category TEXT DEFAULT "others")')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY, 
+        first_name TEXT,
+        username TEXT,
+        status TEXT DEFAULT "unpaid", 
+        pending_movie INTEGER DEFAULT 0
+    )''')
+    cursor.execute('CREATE TABLE IF NOT EXISTS movies (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER UNIQUE, title TEXT, category TEXT DEFAULT "others")')
     conn.commit()
     conn.close()
 
 init_db()
 
+# 🔗 ለአስተዳዳሪው መልእክት መላኪያ Inline Link Button
+def get_admin_link_markup(existing_markup=None):
+    if existing_markup is None:
+        markup = telebot.types.InlineKeyboardMarkup()
+    else:
+        markup = existing_markup
+    markup.add(telebot.types.InlineKeyboardButton("💬 ለአስተዳዳሪው መልእክት ለመላክ", url="https://t.me/Power_werked"))
+    return markup
+
+# ⌨️ የታችኛው ዋና ኪቦርድ (ከዚህ ላይ "አስተዳዳሪውን ለማናገር" ተወግዷል!)
 def get_main_keyboard(user_id):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add("🎬 የፊልሞች ዝርዝር", "🌐 የፊልም ምድቦች")
     markup.add("💰 የዋጋ ዝርዝር", "🏦 የባንክ አካውንቶች")
-    markup.add("💬 አስተዳዳሪውን ለማናገር")
-    # 👑 ለአስተዳዳሪው ብቻ የሚታይ ልዩ በተን
     if user_id == ADMIN_ID:
         markup.add("⚙️ አድሚን ፓነል (Admin Panel)")
     return markup
@@ -61,6 +75,8 @@ def generate_invite_link():
 @bot.message_handler(commands=['start'])
 def start_welcome(message):
     user_id = message.from_user.id
+    first_name = message.from_user.first_name or "ተጠቃሚ"
+    username = message.from_user.username or "የለውም"
     
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -68,8 +84,12 @@ def start_welcome(message):
     result = cursor.fetchone()
     
     if not result:
-        cursor.execute("INSERT INTO users (user_id, status) VALUES (?, 'unpaid')", (user_id,))
-        conn.commit()
+        cursor.execute("INSERT INTO users (user_id, first_name, username, status) VALUES (?, ?, ?, 'unpaid')", 
+                       (user_id, first_name, username))
+    else:
+        cursor.execute("UPDATE users SET first_name = ?, username = ? WHERE user_id = ?", 
+                       (first_name, username, user_id))
+    conn.commit()
     conn.close()
 
     welcome_text = (
@@ -83,11 +103,80 @@ def start_welcome(message):
     )
     bot.send_message(message.chat.id, welcome_text, reply_markup=get_main_keyboard(user_id), parse_mode="Markdown")
 
-# 📸 የደረሰኝ ፎቶ ሲላክ (አሁን የ 5 ብሩን በተን ሁልጊዜ ለአድሚን ያመጣል)
+# 👥 የተጠቃሚዎችን ዝርዝር ማሳያ function
+def show_users_list(chat_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, first_name, username, status FROM users")
+    all_users = cursor.fetchall()
+    conn.close()
+
+    if not all_users:
+        bot.send_message(chat_id, "⚠️ በአሁኑ ጊዜ በቦቱ የተመዘገበ ምንም ተጠቃሚ የለም።")
+        return
+
+    text = f"📊 **የቦቱ ተጠቃሚዎች እና VIP አባላት ዝርዝር (ጠቅላላ፦ {len(all_users)})**\n\n"
+    for u in all_users:
+        uid, name, uname, status = u
+        badge = "🟢 VIP (ከፍሏል)" if status == 'paid' else "🔴 ያልከፈለ"
+        uname_str = f"@{uname}" if uname != "የለውም" else "ዩዘርኔም የለውም"
+        
+        text += f"👤 **ስም፦** {name}\n"
+        text += f"🆔 **ID፦** `{uid}`\n"
+        text += f"🔗 **Username፦** {uname_str}\n"
+        text += f"📌 **ሁኔታ፦** {badge}\n"
+        text += f"-----------------------------\n"
+
+    text += "\n💡 **አባል ለመጨመር/ለመቀነስ እነዚህን ትዕዛዞች ይጻፉ፦**\n"
+    text += "➕ VIP ለመስጠት፦ `/add USER_ID`\n"
+    text += "➖ ከVIP ለማስወገድ፦ `/revoke USER_ID`"
+    bot.send_message(chat_id, text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['users'])
+def list_users_cmd(message):
+    if message.from_user.id == ADMIN_ID:
+        show_users_list(message.chat.id)
+
+# 🔄 የቻናል Sync ማድረጊያ function
+def perform_channel_sync(chat_id):
+    status_msg = bot.send_message(chat_id, "🔄 የቻናሉን ፊልሞች ወደ ዳታቤዝ በመመዝገብ ላይ ነው... እባክህ ትንሽ ጠብቅ!")
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        saved_count = 0
+        
+        start_id = max(1, status_msg.message_id - 300)
+        end_id = status_msg.message_id + 10
+        
+        for msg_id in range(start_id, end_id):
+            try:
+                res = bot.forward_message(chat_id=ADMIN_ID, from_chat_id=CHANNEL_ID, message_id=msg_id, disable_notification=True)
+                title = res.caption or res.text or (res.video.file_name if res.video else None) or (res.document.file_name if res.document else None)
+                
+                if title:
+                    clean_title = os.path.splitext(title)[0]
+                    cursor.execute("INSERT OR IGNORE INTO movies (message_id, title, category) VALUES (?, ?, 'others')", (msg_id, clean_title))
+                    saved_count += 1
+                
+                bot.delete_message(ADMIN_ID, res.message_id)
+            except Exception:
+                continue
+
+        conn.commit()
+        conn.close()
+        bot.edit_message_text(f"✅ **የሲንክ ስራ ተጠናቋል!**\nለቦቱ ዳታቤዝ በድጋሚ የተመዘገቡ ፊልሞች ብዛት፦ `{saved_count}`", chat_id=ADMIN_ID, message_id=status_msg.message_id, parse_mode="Markdown")
+    except Exception as e:
+        bot.edit_message_text(f"⚠️ የሲንክ ስህተት፦ {e}", chat_id=ADMIN_ID, message_id=status_msg.message_id)
+
+@bot.message_handler(commands=['sync'])
+def sync_cmd(message):
+    if message.from_user.id == ADMIN_ID:
+        perform_channel_sync(message.chat.id)
+
 @bot.message_handler(content_types=['photo'])
 def handle_receipt(message):
     user_id = message.from_user.id
-    user_name = message.from_user.first_name
+    user_name = message.from_user.first_name or "ተጠቃሚ"
     photo_id = message.photo[-1].file_id
     
     conn = get_db_connection()
@@ -98,8 +187,6 @@ def handle_receipt(message):
     conn.close()
 
     markup = telebot.types.InlineKeyboardMarkup(row_width=2)
-    
-    # የ 5 ብር ነጠላ ፊልም በተን
     btn_single = telebot.types.InlineKeyboardButton("🎬 5 ብር (ነጠላ ፊልም)", callback_data=f"app_single_{user_id}_{pending_movie}")
     btn_day = telebot.types.InlineKeyboardButton("☀️ 30 ብር (ዕለታዊ)", callback_data=f"app_unlim_{user_id}")
     btn_week = telebot.types.InlineKeyboardButton("📅 70 ብር (ሳምንታዊ)", callback_data=f"app_unlim_{user_id}")
@@ -117,7 +204,8 @@ def handle_receipt(message):
         reply_markup=markup,
         parse_mode="Markdown"
     )
-    bot.reply_to(message, "⏳ የደረሰኝ ፎቶዎ ለአስተዳዳሪው ተልኳል። ክፍያዎ ተረጋግጦ እስኪከፈትልዎት ድረስ እባክዎ በትዕግስት ይቆዩ!")
+    
+    bot.reply_to(message, "⏳ የደረሰኝ ፎቶዎ ለአስተዳዳሪው ተልኳል። ክፍያዎ ተረጋግጦ እስኪከፈትልዎት ድረስ እባክዎ በትዕግስት ይቆዩ!", reply_markup=get_admin_link_markup())
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("app_") or call.data.startswith("reject_"))
 def callback_listener(call):
@@ -137,7 +225,6 @@ def callback_listener(call):
         conn.close()
         
         invite_link = generate_invite_link()
-        
         bot.edit_message_caption(
             chat_id=ADMIN_ID,
             message_id=call.message.message_id,
@@ -155,7 +242,6 @@ def callback_listener(call):
         
     elif action == "single":
         movie_msg_id = int(data[3])
-        
         bot.edit_message_caption(
             chat_id=ADMIN_ID,
             message_id=call.message.message_id,
@@ -179,15 +265,36 @@ def callback_listener(call):
             caption=call.message.caption + "\n\n🔴 **ተከልክሏል! ክፍያው ውድቅ ተደርጓል።**",
             reply_markup=None
         )
-        bot.send_message(target_user_id, "❌ የላኩት ክፍያ ተቀባይነት አላገኘም። እባክዎ ትክክለኛውን የክፍያ ደረሰኝ ፎቶ መላክዎን ያረጋግጡ።")
+        bot.send_message(target_user_id, "❌ የላኩት ክፍያ ተቀባይነት አላገኘም። እባክዎ ትክክለኛውን የክፍያ ደረሰኝ ፎቶ መላክዎን ያረጋግጡ።", reply_markup=get_admin_link_markup())
 
-# ⚙️ የአስተዳዳሪ ብቻ ፓነል እና አባላትን ማስወገጃ Command
-@bot.message_handler(func=lambda message: message.text == "⚙️ አድሚን ፓነል (Admin Panel)" or message.text.startswith('/revoke'))
+# 👑 የአድሚን ፓነል መቆጣጠሪያ
+@bot.message_handler(func=lambda message: message.text == "⚙️ አድሚን ፓነል (Admin Panel)" or message.text.startswith('/revoke') or message.text.startswith('/add'))
 def admin_panel(message):
     if message.from_user.id != ADMIN_ID:
         return
 
-    if message.text.startswith('/revoke'):
+    # ➕ VIP አባል መጨመሪያ
+    if message.text.startswith('/add'):
+        try:
+            target_id = int(message.text.split()[1])
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET status = 'paid' WHERE user_id = ?", (target_id,))
+            conn.commit()
+            conn.close()
+            
+            invite_link = generate_invite_link()
+            msg = "🎉 **በአስተዳዳሪው አማካኝነት የ VIP አባልነት ተፈቅዶልዎታል!**\n\n"
+            if invite_link:
+                msg += f"🔗 **የ VIP ቻናላችንን ለመቀላቀል ይህንን ሊንክ ይጫኑ፦**\n{invite_link}"
+            
+            bot.send_message(target_id, msg, parse_mode="Markdown")
+            bot.reply_to(message, f"✅ ID `{target_id}` ያለው ተጠቃሚ በተሳካ ሁኔታ ወደ VIP ተጨምሯል!", parse_mode="Markdown")
+        except Exception as e:
+            bot.reply_to(message, f"⚠️ እባክህ በዚህ መልክ ጻፍ፦ `/add 12345678`\nስህተት፦ {e}")
+
+    # ➖ VIP አባል ማስወገጃ
+    elif message.text.startswith('/revoke'):
         try:
             target_id = int(message.text.split()[1])
             conn = get_db_connection()
@@ -206,35 +313,47 @@ def admin_panel(message):
             bot.reply_to(message, f"⛔ ID `{target_id}` ያለው ተጠቃሚ ከ VIP ተሰርዟል!{chan_msg}", parse_mode="Markdown")
         except Exception:
             bot.reply_to(message, "⚠️ እባክህ በዚህ መልክ ጻፍ፦ `/revoke 12345678` (ማስወገድ የምትፈልገውን ሰው ID አስገባ)")
+
     else:
+        # የአድሚን ፓነል Inline Buttons (በጥራት መልእክቱ ስር የሚወጡ)
+        markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+        btn_users = telebot.types.InlineKeyboardButton("👥 የተጠቃሚዎች ዝርዝር", callback_data="adm_users")
+        btn_sync = telebot.types.InlineKeyboardButton("🔄 ቻናል Sync ማድረጊያ", callback_data="adm_sync")
+        markup.add(btn_users, btn_sync)
+
         admin_info = (
             "👑 **የአስተዳዳሪ መቆጣጠሪያ ፓነል**\n\n"
-            "📌 **አባል ከ VIP ቻናል ለማስወገድ፦**\n"
-            "በቦቱ ላይ `/revoke USER_ID` ብለህ ጻፍ።\n"
-            "ምሳሌ፦ `/revoke 8609938129`\n\n"
-            "*(ይህ ሲደረግ አባሉ ከVIP ቻናሉም ይባረራል፡ ቦቱም ላይ ወደ አልከፈለ ተጠቃሚ ይይረጋል)*"
+            "📌 **የአባላት መጨመሪያና ማስወገጃ ትዕዛዞች፦**\n"
+            "➕ **አዲስ VIP አባል ለመጨመር፦** `/add USER_ID`\n"
+            "➖ **አባልን ከVIP ለማስወገድ፦** `/revoke USER_ID`\n\n"
+            "👇 ወይም ከታች ያሉትን በተኖች ይጠቀሙ፦"
         )
-        bot.send_message(ADMIN_ID, admin_info, parse_mode="Markdown")
+        bot.send_message(ADMIN_ID, admin_info, reply_markup=markup, parse_mode="Markdown")
 
-# 🎬 ቻናሉ ላይ ፊልም ሲጫን ለአድሚኑ የምድብ መምረጫ መላኪያ
+@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_"))
+def handle_admin_callbacks(call):
+    if call.from_user.id != ADMIN_ID:
+        return
+    
+    if call.data == "adm_users":
+        show_users_list(call.message.chat.id)
+    elif call.data == "adm_sync":
+        perform_channel_sync(call.message.chat.id)
+    bot.answer_callback_query(call.id)
+
 @bot.channel_post_handler(content_types=['video', 'document', 'audio', 'text'])
 def handle_channel_post(message):
     if message.chat.id == CHANNEL_ID:
-        title = None
-        if message.caption:
-            title = message.caption
-        elif message.text:
-            title = message.text
-        elif message.video and message.video.file_name:
-            title = os.path.splitext(message.video.file_name)[0]
-        elif message.document and message.document.file_name:
-            title = os.path.splitext(message.document.file_name)[0]
+        title = message.caption or message.text
+        if not title and message.video and message.video.file_name:
+            title = message.video.file_name
+        elif not title and message.document and message.document.file_name:
+            title = message.document.file_name
         
         if not title or title.strip() == "":
             title = f"የፊልም ቪዲዮ #{message.message_id}"
 
-        clean_title = title.strip()
-        
+        clean_title = os.path.splitext(title.strip())[0]
         markup = telebot.types.InlineKeyboardMarkup(row_width=2)
         btn1 = telebot.types.InlineKeyboardButton("🇮🇳 የህንድ", callback_data=f"set_hind_{message.message_id}")
         btn2 = telebot.types.InlineKeyboardButton("🇪🇹 የአማርኛ ነጠላ", callback_data=f"set_amharicsingle_{message.message_id}")
@@ -246,7 +365,6 @@ def handle_channel_post(message):
         btn8 = telebot.types.InlineKeyboardButton("📁 ሌላ", callback_data=f"set_others_{message.message_id}")
         
         markup.add(btn1, btn2, btn3, btn4, btn5, btn6, btn7, btn8)
-        
         bot.send_message(
             ADMIN_ID, 
             f"🎬 **አዲስ ፊልም ተገኝቷል፦**\n👉 `{clean_title}`\n\nእባክህ የዚህን ፊልም ምድብ ምረጥ፦", 
@@ -271,17 +389,16 @@ def save_movie_by_category(call):
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO movies (message_id, title, category) VALUES (?, ?, ?)", (message_id, full_title, category))
+    cursor.execute("INSERT OR REPLACE INTO movies (message_id, title, category) VALUES (?, ?, ?)", (message_id, full_title, category))
     conn.commit()
     conn.close()
     
     cat_names = {
         "hind": "🇮🇳 የህንድ", "amharicsingle": "🇪🇹 የአማርኛ ነጠላ", "amharicseries": "📺 የአማርኛ ተከታታይ", 
         "turkish": "🇹🇷 የቱርክ", "chinese": "🇨🇳 የቻይና", "otherseries": "🌍 የሌሎች ሀገር ተከታታይ",
-        "action": "💥 አክሽን", "others": "📁 ሌላ"
+        "action": "💥 አክရှင်း", "others": "📁 ሌላ"
     }
     friendly_name = cat_names.get(category, "ሌላ")
-    
     bot.edit_message_text(
         chat_id=ADMIN_ID,
         message_id=call.message.message_id,
@@ -290,7 +407,7 @@ def save_movie_by_category(call):
         parse_mode="Markdown"
     )
 
-@bot.message_handler(func=lambda message: message.text in ["🎬 የፊልሞች ዝርዝር", "🌐 የፊልም ምድቦች", "💰 የዋጋ ዝርዝር", "🏦 የባንክ አካውንቶች", "💬 አስተዳዳሪውን ለማናገር"])
+@bot.message_handler(func=lambda message: message.text in ["🎬 የፊልሞች ዝርዝር", "🌐 የፊልም ምድቦች", "💰 የዋጋ ዝርዝር", "🏦 የባንክ አካውንቶች"])
 def handle_menu_buttons(message):
     user_id = message.from_user.id
     if message.text == "🎬 የፊልሞች ዝርዝር":
@@ -304,9 +421,10 @@ def handle_menu_buttons(message):
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
             for movie in movies:
                 markup.add(telebot.types.InlineKeyboardButton(f"🎥 {movie[1]}", callback_data=f"askpay_{movie[0]}"))
+            markup = get_admin_link_markup(markup)
             bot.send_message(message.chat.id, "🎬 **የፊልሞች ዝርዝር እነሆ!** ማየት የሚፈልጉትን ፊልም ይጫኑ፦", reply_markup=markup)
         else:
-            bot.send_message(message.chat.id, "😔 በአሁኑ ሰዓት በዳታቤዛችን ውስጥ ምንም ፊልም የለም።")
+            bot.send_message(message.chat.id, "😔 በአሁኑ ሰዓት በዳታቤዛችን ውስጥ ምንም ፊልም የለም።", reply_markup=get_admin_link_markup())
 
     elif message.text == "🌐 የፊልም ምድቦች":
         markup = telebot.types.InlineKeyboardMarkup(row_width=2)
@@ -318,6 +436,7 @@ def handle_menu_buttons(message):
         btn6 = telebot.types.InlineKeyboardButton("🌍 የሌሎች ሀገር ተከታታይ", callback_data="cat_otherseries")
         btn7 = telebot.types.InlineKeyboardButton("💥 አክሽን ፊልሞች", callback_data="cat_action")
         markup.add(btn1, btn2, btn3, btn4, btn5, btn6, btn7)
+        markup = get_admin_link_markup(markup)
         bot.send_message(message.chat.id, "🍿 የትኛውን ምድብ መመልከት ይፈልጋሉ? ከታች ይምረጡ፦", reply_markup=markup)
 
     elif message.text == "💰 የዋጋ ዝርዝር":
@@ -329,7 +448,7 @@ def handle_menu_buttons(message):
             "🗓️ **የወርሃዊ VIP (30 ቀን)፦** 100 ብር\n\n"
             "🔥 *የሚፈልጉትን ፓኬጅ መርጠው በባንክ አካውንታችን ክፍያ ፈጽመው ደረሰኝ ይላኩ!*"
         )
-        bot.send_message(message.chat.id, price_text, parse_mode="Markdown")
+        bot.send_message(message.chat.id, price_text, reply_markup=get_admin_link_markup(), parse_mode="Markdown")
 
     elif message.text == "🏦 የባንክ አካውንቶች":
         bank_text = (
@@ -341,18 +460,7 @@ def handle_menu_buttons(message):
             "🏦 **አማራ ባንክ (Amhara Bank)፦**\n👉 `9900039885356`\n\n"
             "⚠️ *ክፍያውን ከፈጸሙ በኋላ ደረሰኙን ፎቶ አንስተው እዚህ ቦት ላይ መላክዎን አይርሱ!*"
         )
-        bot.send_message(message.chat.id, bank_text, parse_mode="Markdown")
-
-    elif message.text == "💬 አስተዳዳሪውን ለማናገር":
-        contact_text = (
-            "🙋‍♂️ **እርዳታ ወይም ጥያቄ አልዎት?**\n\n"
-            "የክፍያ ችግር፣ አስተያየት ወይም ተጨማሪ መረጃ ከፈለጉ አስተዳዳሪውን ቀጥታ ማናገር ይችላሉ፦\n\n"
-            "👉 **የቴሌግራም አድራሻ፦** @Power_werked"
-        )
-        markup = telebot.types.InlineKeyboardMarkup()
-        btn_contact = telebot.types.InlineKeyboardButton("💬 ቀጥታ አድሚኑን አውራ (Chat)", url="https://t.me/Power_werked")
-        markup.add(btn_contact)
-        bot.send_message(message.chat.id, contact_text, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(message.chat.id, bank_text, reply_markup=get_admin_link_markup(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
 def handle_category_selection(call):
@@ -365,7 +473,7 @@ def handle_category_selection(call):
     
     cat_names = {
         "hind": "🇮🇳 የህንድ", "amharicsingle": "🇪🇹 የአማርኛ ነጠላ", "amharicseries": "📺 የአማርኛ ተከታታይ", 
-        "turkish": "🇹🇷 የቱርክ", "chinese": "🇨🇳 የቻይና", "otherseries": "🌍 የሌሎች ሀገር ተከታታይ", "action": "💥 አክሽን"
+        "turkish": "🇹🇷 የቱርክ", "chinese": "🇨🇳 የቻይና", "otherseries": "🌍 የሌሎች ሀገር ተከታታይ", "action": "💥 አክရှင်း"
     }
     friendly_name = cat_names.get(cat_type, "ሌሎች")
     
@@ -373,9 +481,10 @@ def handle_category_selection(call):
         markup = telebot.types.InlineKeyboardMarkup(row_width=1)
         for movie in movies:
             markup.add(telebot.types.InlineKeyboardButton(f"🎥 {movie[1]}", callback_data=f"askpay_{movie[0]}"))
+        markup = get_admin_link_markup(markup)
         bot.send_message(call.message.chat.id, f"🌐 **የ {friendly_name} ዝርዝር፦**\nለመውረድ የሚፈልጉትን ፊልም ይጫኑ፦", reply_markup=markup)
     else:
-        bot.send_message(call.message.chat.id, f"😔 በአሁኑ ሰዓት በ {friendly_name} ምድብ ውስጥ የተመዘገበ ፊልም የለም።")
+        bot.send_message(call.message.chat.id, f"😔 በአሁኑ ሰዓት በ {friendly_name} ምድብ ውስጥ የተመዘገበ ፊልም የለም።", reply_markup=get_admin_link_markup())
     bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("askpay_"))
@@ -394,7 +503,7 @@ def handle_movie_request(call):
         try:
             bot.copy_message(chat_id=user_id, from_chat_id=CHANNEL_ID, message_id=message_id)
         except Exception:
-            bot.send_message(user_id, "⚠️ ፊልሙን መላክ አልተቻለም።")
+            bot.send_message(user_id, "⚠️ ፊልሙን መላክ አልተቻለም።", reply_markup=get_admin_link_markup())
     else:
         cursor.execute("UPDATE users SET pending_movie = ? WHERE user_id = ?", (message_id, user_id))
         conn.commit()
@@ -412,7 +521,7 @@ def handle_movie_request(call):
             "- 🏦 **CBE ባንክ፦** `1000745390448`\n\n"
             "📸 ክፍያውን እንደፈጸሙ የደረሰኙን ፎቶ (Screenshot) እዚህ ቦት ላይ ይላኩ!"
         )
-        bot.send_message(user_id, pay_info, parse_mode="Markdown")
+        bot.send_message(user_id, pay_info, reply_markup=get_admin_link_markup(), parse_mode="Markdown")
         bot.answer_callback_query(call.id)
 
 @bot.message_handler(func=lambda message: True)
@@ -428,9 +537,10 @@ def handle_movie_search(message):
         markup = telebot.types.InlineKeyboardMarkup(row_width=1)
         for movie in search_results:
             markup.add(telebot.types.InlineKeyboardButton(f"🎥 {movie[1]}", callback_data=f"askpay_{movie[0]}"))
+        markup = get_admin_link_markup(markup)
         bot.reply_to(message, f"🔍 **ከተደረገው ፍለጋ ጋር የሚዛመዱ {len(search_results)} ፊልሞች ተገኝተዋል፦**", reply_markup=markup)
     else:
-        bot.reply_to(message, "😔 ይቅርታ፣ የፈለጉት ፊልም በዳታቤዛችን ውስጥ አልተገኘም።")
+        bot.reply_to(message, "😔 ይቅርታ፣ የፈለጉት ፊልም በዳታቤዛችን ውስጥ አልተገኘም።", reply_markup=get_admin_link_markup())
 
 print("የተሻሻለው አዲሱ ፊልም ቦት በተሳካ ሁኔታ ዝግጁ ሆኗል...")
 bot.infinity_polling()
